@@ -81,6 +81,7 @@ export default function typescript(options?: Partial<IOptions>)
 				context.info(`running in watch mode`);
 
 			parsedConfig = parseTsConfig(context, pluginOptions);
+			parsedConfig.options.suppressOutputPathCheck = true;
 
 			if (parsedConfig.options.rootDirs)
 			{
