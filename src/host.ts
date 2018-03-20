@@ -1,8 +1,8 @@
 import { tsModule } from "./tsproxy";
 import * as tsTypes from "typescript";
-import { existsSync } from "fs";
 import * as _ from "lodash";
 import { normalize } from "./normalize";
+import { FileExistsHook, ReadFileHook } from "./ioptions";
 
 export class LanguageServiceHost implements tsTypes.LanguageServiceHost
 {
@@ -10,7 +10,7 @@ export class LanguageServiceHost implements tsTypes.LanguageServiceHost
 	private snapshots: { [fileName: string]: tsTypes.IScriptSnapshot } = {};
 	private versions: { [fileName: string]: number } = {};
 
-	constructor(private parsedConfig: tsTypes.ParsedCommandLine)
+	constructor(private parsedConfig: tsTypes.ParsedCommandLine, private fileExistsHook: FileExistsHook, private readFileHook: ReadFileHook)
 	{
 	}
 
@@ -37,9 +37,9 @@ export class LanguageServiceHost implements tsTypes.LanguageServiceHost
 		if (_.has(this.snapshots, fileName))
 			return this.snapshots[fileName];
 
-		if (existsSync(fileName))
+		if (this.fileExists(fileName))
 		{
-			this.snapshots[fileName] = tsModule.ScriptSnapshot.fromString(tsModule.sys.readFile(fileName)!);
+			this.snapshots[fileName] = tsModule.ScriptSnapshot.fromString(this.readFile(fileName)!);
 			this.versions[fileName] = (this.versions[fileName] || 0) + 1;
 			return this.snapshots[fileName];
 		}
@@ -86,12 +86,16 @@ export class LanguageServiceHost implements tsTypes.LanguageServiceHost
 
 	public readFile(path: string, encoding?: string): string | undefined
 	{
+		const result = this.readFileHook(path);
+		if (typeof result == "string") {
+			return result;
+		}
 		return tsModule.sys.readFile(path, encoding);
 	}
 
 	public fileExists(path: string): boolean
 	{
-		return tsModule.sys.fileExists(path);
+		return this.fileExistsHook(path) || tsModule.sys.fileExists(path);
 	}
 
 	public getTypeRootsVersion(): number

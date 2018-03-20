@@ -29,6 +29,7 @@ export default function typescript(options?: Partial<IOptions>)
 	let parsedConfig: tsTypes.ParsedCommandLine;
 	let servicesHost: LanguageServiceHost;
 	let service: tsTypes.LanguageService;
+	let program: tsTypes.Program;
 	let noErrors = true;
 	const declarations: { [name: string]: tsTypes.OutputFile } = {};
 
@@ -120,13 +121,17 @@ export default function typescript(options?: Partial<IOptions>)
 				context.debug(() => `excluded:\n'${JSON.stringify(pluginOptions.exclude, undefined, 4)}'`);
 			}
 
-			servicesHost = new LanguageServiceHost(parsedConfig);
+			servicesHost = new LanguageServiceHost(parsedConfig, pluginOptions.fileExistsHook || (() => false), pluginOptions.readFileHook || (() => {}));
 
 			service = tsModule.createLanguageService(servicesHost, tsModule.createDocumentRegistry());
 
 			// printing compiler option errors
 			if (pluginOptions.check)
 				printDiagnostics(context, convertDiagnostic("options", service.getCompilerOptionsDiagnostics()), parsedConfig.options.pretty === true);
+
+			program = service.getProgram();
+			if (pluginOptions.programCreated)
+				pluginOptions.programCreated(program);
 
 			if (pluginOptions.clean)
 				cache().clean();
@@ -143,19 +148,26 @@ export default function typescript(options?: Partial<IOptions>)
 			importer = importer.split("\\").join("/");
 
 			// TODO: use module resolution cache
-			const result = tsModule.nodeModuleNameResolver(importee, importer, parsedConfig.options, tsModule.sys);
+			const result = tsModule.nodeModuleNameResolver(importee, importer, parsedConfig.options, servicesHost);
 
 			if (result.resolvedModule && result.resolvedModule.resolvedFileName)
 			{
 				if (filter(result.resolvedModule.resolvedFileName))
 					cache().setDependency(result.resolvedModule.resolvedFileName, importer);
 
-				if (_.endsWith(result.resolvedModule.resolvedFileName, ".d.ts"))
-					return null;
+				let resolved = result.resolvedModule.resolvedFileName;
 
-				const resolved = pluginOptions.rollupCommonJSResolveHack
-					? resolve.sync(result.resolvedModule.resolvedFileName)
-					: result.resolvedModule.resolvedFileName;
+				if (_.endsWith(resolved, ".d.ts")) {
+					const jsFileName = resolved.replace(/\.d\.ts$/, ".js");
+					if (!servicesHost.fileExists(jsFileName)) {
+						return null;
+					}
+					resolved = jsFileName;
+				}
+
+				if (pluginOptions.rollupCommonJSResolveHack) {
+					resolved = resolve.sync(resolved);
+				}
 
 				context.debug(() => `${blue("resolving")} '${importee}'`);
 				context.debug(() => `    to '${resolved}'`);
@@ -170,6 +182,13 @@ export default function typescript(options?: Partial<IOptions>)
 		{
 			if (id === "\0" + TSLIB)
 				return tslibSource;
+
+			if (pluginOptions.readFileHook) {
+				const hookedFile = pluginOptions.readFileHook(id);
+				if (typeof hookedFile == "string") {
+					return hookedFile;
+				}
+			}
 
 			return undefined;
 		},
@@ -188,6 +207,9 @@ export default function typescript(options?: Partial<IOptions>)
 			// getting compiled file from cache or from ts
 			const result = cache().getCompiled(id, snapshot, () =>
 			{
+				if (!program.getSourceFile(id)) {
+					return undefined;
+				}
 				const output = service.getEmitOutput(id);
 
 				if (output.emitSkipped)
@@ -224,7 +246,7 @@ export default function typescript(options?: Partial<IOptions>)
 				};
 			});
 
-			if (pluginOptions.check)
+			if (pluginOptions.check && program.getSourceFile(id))
 			{
 				const diagnostics = _.concat(
 					cache().getSyntacticDiagnostics(id, snapshot, () =>
