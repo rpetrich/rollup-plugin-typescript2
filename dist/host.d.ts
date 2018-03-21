@@ -1,10 +1,13 @@
 import * as tsTypes from "typescript";
+import { FileExistsHook, ReadFileHook } from "./ioptions";
 export declare class LanguageServiceHost implements tsTypes.LanguageServiceHost {
     private parsedConfig;
+    private fileExistsHook;
+    private readFileHook;
     private cwd;
     private snapshots;
     private versions;
-    constructor(parsedConfig: tsTypes.ParsedCommandLine);
+    constructor(parsedConfig: tsTypes.ParsedCommandLine, fileExistsHook: FileExistsHook, readFileHook: ReadFileHook);
     reset(): void;
     setSnapshot(fileName: string, data: string): tsTypes.IScriptSnapshot;
     getScriptSnapshot(fileName: string): tsTypes.IScriptSnapshot | undefined;

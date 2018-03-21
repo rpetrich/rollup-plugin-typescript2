@@ -1,4 +1,7 @@
 import { tsModule } from "./tsproxy";
+import * as ts from "typescript";
+export declare type FileExistsHook = (path: string) => boolean;
+export declare type ReadFileHook = (path: string) => string | void;
 export interface IOptions {
     include: string | string[];
     exclude: string | string[];
@@ -13,4 +16,7 @@ export interface IOptions {
     typescript: typeof tsModule;
     tsconfigOverride: any;
     tsconfigDefaults: any;
+    programCreated: (program: ts.Program) => void;
+    readFileHook: ReadFileHook;
+    fileExistsHook: FileExistsHook;
 }

@@ -1,7 +1,7 @@
 /* eslint-disable */
-import { existsSync, readdirSync, renameSync, readFileSync } from 'fs';
 import crypto from 'crypto';
 import { emptyDirSync, ensureFileSync, readJsonSync, removeSync, writeJsonSync } from 'fs-extra';
+import { existsSync, readdirSync, renameSync, readFileSync } from 'fs';
 import { dirname, isAbsolute, join, relative, normalize } from 'path';
 import { sync } from 'resolve';
 
@@ -17239,8 +17239,10 @@ function normalize$1(fileName) {
 }
 
 var LanguageServiceHost = /** @class */ (function () {
-    function LanguageServiceHost(parsedConfig) {
+    function LanguageServiceHost(parsedConfig, fileExistsHook, readFileHook) {
         this.parsedConfig = parsedConfig;
+        this.fileExistsHook = fileExistsHook;
+        this.readFileHook = readFileHook;
         this.cwd = process.cwd();
         this.snapshots = {};
         this.versions = {};
@@ -17260,8 +17262,8 @@ var LanguageServiceHost = /** @class */ (function () {
         fileName = normalize$1(fileName);
         if (lodash_8(this.snapshots, fileName))
             return this.snapshots[fileName];
-        if (existsSync(fileName)) {
-            this.snapshots[fileName] = tsModule.ScriptSnapshot.fromString(tsModule.sys.readFile(fileName));
+        if (this.fileExists(fileName)) {
+            this.snapshots[fileName] = tsModule.ScriptSnapshot.fromString(this.readFile(fileName));
             this.versions[fileName] = (this.versions[fileName] || 0) + 1;
             return this.snapshots[fileName];
         }
@@ -17290,10 +17292,14 @@ var LanguageServiceHost = /** @class */ (function () {
         return tsModule.sys.readDirectory(path, extensions, exclude, include);
     };
     LanguageServiceHost.prototype.readFile = function (path, encoding) {
+        var result = this.readFileHook(path);
+        if (typeof result == "string") {
+            return result;
+        }
         return tsModule.sys.readFile(path, encoding);
     };
     LanguageServiceHost.prototype.fileExists = function (path) {
-        return tsModule.sys.fileExists(path);
+        return this.fileExistsHook(path) || tsModule.sys.fileExists(path);
     };
     LanguageServiceHost.prototype.getTypeRootsVersion = function () {
         return 0;
@@ -19841,6 +19847,7 @@ function typescript(options) {
     var parsedConfig;
     var servicesHost;
     var service;
+    var program;
     var noErrors = true;
     var declarations = {};
     var _cache;
@@ -19908,11 +19915,14 @@ function typescript(options) {
                 context.debug(function () { return "included:\n'" + JSON.stringify(pluginOptions.include, undefined, 4) + "'"; });
                 context.debug(function () { return "excluded:\n'" + JSON.stringify(pluginOptions.exclude, undefined, 4) + "'"; });
             }
-            servicesHost = new LanguageServiceHost(parsedConfig);
+            servicesHost = new LanguageServiceHost(parsedConfig, pluginOptions.fileExistsHook || (function () { return false; }), pluginOptions.readFileHook || (function () { }));
             service = tsModule.createLanguageService(servicesHost, tsModule.createDocumentRegistry());
             // printing compiler option errors
             if (pluginOptions.check)
                 printDiagnostics(context, convertDiagnostic("options", service.getCompilerOptionsDiagnostics()), parsedConfig.options.pretty === true);
+            program = service.getProgram();
+            if (pluginOptions.programCreated)
+                pluginOptions.programCreated(program);
             if (pluginOptions.clean)
                 cache().clean();
         },
@@ -19923,15 +19933,21 @@ function typescript(options) {
                 return null;
             importer = importer.split("\\").join("/");
             // TODO: use module resolution cache
-            var result = tsModule.nodeModuleNameResolver(importee, importer, parsedConfig.options, tsModule.sys);
+            var result = tsModule.nodeModuleNameResolver(importee, importer, parsedConfig.options, servicesHost);
             if (result.resolvedModule && result.resolvedModule.resolvedFileName) {
                 if (filter(result.resolvedModule.resolvedFileName))
                     cache().setDependency(result.resolvedModule.resolvedFileName, importer);
-                if (lodash_6(result.resolvedModule.resolvedFileName, ".d.ts"))
-                    return null;
-                var resolved_1 = pluginOptions.rollupCommonJSResolveHack
-                    ? sync(result.resolvedModule.resolvedFileName)
-                    : result.resolvedModule.resolvedFileName;
+                var resolved_1 = result.resolvedModule.resolvedFileName;
+                if (lodash_6(resolved_1, ".d.ts")) {
+                    var jsFileName = resolved_1.replace(/\.d\.ts$/, ".js");
+                    if (!servicesHost.fileExists(jsFileName)) {
+                        return null;
+                    }
+                    resolved_1 = jsFileName;
+                }
+                if (pluginOptions.rollupCommonJSResolveHack) {
+                    resolved_1 = sync(resolved_1);
+                }
                 context.debug(function () { return safe_5("resolving") + " '" + importee + "'"; });
                 context.debug(function () { return "    to '" + resolved_1 + "'"; });
                 return resolved_1;
@@ -19941,6 +19957,12 @@ function typescript(options) {
         load: function (id) {
             if (id === "\0" + TSLIB)
                 return tslibSource;
+            if (pluginOptions.readFileHook) {
+                var hookedFile = pluginOptions.readFileHook(id);
+                if (typeof hookedFile == "string") {
+                    return hookedFile;
+                }
+            }
             return undefined;
         },
         transform: function (code, id) {
@@ -19952,6 +19974,9 @@ function typescript(options) {
             var snapshot = servicesHost.setSnapshot(id, code);
             // getting compiled file from cache or from ts
             var result = cache().getCompiled(id, snapshot, function () {
+                if (!program.getSourceFile(id)) {
+                    return undefined;
+                }
                 var output = service.getEmitOutput(id);
                 if (output.emitSkipped) {
                     noErrors = false;
@@ -19976,7 +20001,7 @@ function typescript(options) {
                     dts: dts,
                 };
             });
-            if (pluginOptions.check) {
+            if (pluginOptions.check && program.getSourceFile(id)) {
                 var diagnostics = lodash_10(cache().getSyntacticDiagnostics(id, snapshot, function () {
                     return service.getSyntacticDiagnostics(id);
                 }), cache().getSemanticDiagnostics(id, snapshot, function () {
