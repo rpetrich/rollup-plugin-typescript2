@@ -16,6 +16,7 @@ export interface IOptions {
     typescript: typeof tsModule;
     tsconfigOverride: any;
     tsconfigDefaults: any;
+    sourceMapCallback: (id: string, map: string) => void;
     programCreated: (program: ts.Program) => void;
     readFileHook: ReadFileHook;
     fileExistsHook: FileExistsHook;
