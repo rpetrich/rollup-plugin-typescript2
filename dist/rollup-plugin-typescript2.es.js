@@ -2,7 +2,9 @@
 import crypto from 'crypto';
 import { emptyDirSync, ensureFileSync, readJsonSync, removeSync, writeJsonSync, pathExistsSync } from 'fs-extra';
 import { existsSync, readdirSync, renameSync, readFileSync } from 'fs';
-import { dirname, isAbsolute, join, relative, normalize } from 'path';
+import os from 'os';
+import util from 'util';
+import { join, dirname, isAbsolute, relative, normalize } from 'path';
 import { sync } from 'resolve';
 
 /*! *****************************************************************************
@@ -45,7 +47,7 @@ var lodash = createCommonjsModule(function (module, exports) {
   var undefined;
 
   /** Used as the semantic version number. */
-  var VERSION = '4.17.5';
+  var VERSION = '4.17.10';
 
   /** Used as the size to enable large array optimizations. */
   var LARGE_ARRAY_SIZE = 200;
@@ -455,7 +457,7 @@ var lodash = createCommonjsModule(function (module, exports) {
   var root = freeGlobal || freeSelf || Function('return this')();
 
   /** Detect free variable `exports`. */
-  var freeExports = 'object' == 'object' && exports && !exports.nodeType && exports;
+  var freeExports = exports && !exports.nodeType && exports;
 
   /** Detect free variable `module`. */
   var freeModule = freeExports && 'object' == 'object' && module && !module.nodeType && module;
@@ -469,6 +471,14 @@ var lodash = createCommonjsModule(function (module, exports) {
   /** Used to access faster Node.js helpers. */
   var nodeUtil = (function() {
     try {
+      // Use `util.types` for Node.js 10+.
+      var types = freeModule && freeModule.require && freeModule.require('util').types;
+
+      if (types) {
+        return types;
+      }
+
+      // Legacy `process.binding('util')` for Node.js < 10.
       return freeProcess && freeProcess.binding && freeProcess.binding('util');
     } catch (e) {}
   }());
@@ -17239,10 +17249,11 @@ function normalize$1(fileName) {
 }
 
 var LanguageServiceHost = /** @class */ (function () {
-    function LanguageServiceHost(parsedConfig, fileExistsHook, readFileHook) {
+    function LanguageServiceHost(parsedConfig, fileExistsHook, readFileHook, transformers) {
         this.parsedConfig = parsedConfig;
         this.fileExistsHook = fileExistsHook;
         this.readFileHook = readFileHook;
+        this.transformers = transformers;
         this.cwd = process.cwd();
         this.snapshots = {};
         this.versions = {};
@@ -17250,6 +17261,9 @@ var LanguageServiceHost = /** @class */ (function () {
     LanguageServiceHost.prototype.reset = function () {
         this.snapshots = {};
         this.versions = {};
+    };
+    LanguageServiceHost.prototype.setLanguageService = function (service) {
+        this.service = service;
     };
     LanguageServiceHost.prototype.setSnapshot = function (fileName, data) {
         fileName = normalize$1(fileName);
@@ -17309,6 +17323,23 @@ var LanguageServiceHost = /** @class */ (function () {
     };
     LanguageServiceHost.prototype.getDirectories = function (directoryName) {
         return tsModule.sys.getDirectories(directoryName);
+    };
+    LanguageServiceHost.prototype.getCustomTransformers = function () {
+        if (this.service === undefined || this.transformers === undefined || this.transformers.length === 0)
+            return undefined;
+        var transformer = {
+            before: [],
+            after: [],
+        };
+        for (var _i = 0, _a = this.transformers; _i < _a.length; _i++) {
+            var creator = _a[_i];
+            var factory = creator(this.service);
+            if (factory.before)
+                transformer.before = lodash_10(transformer.before, factory.before);
+            if (factory.after)
+                transformer.after = lodash_10(transformer.after, factory.after);
+        }
+        return transformer;
     };
     return LanguageServiceHost;
 }());
@@ -18547,6 +18578,7 @@ function applyDefaults(object, options){
   options.respectFunctionProperties = options.respectFunctionProperties === false ? false : true;
   options.unorderedArrays = options.unorderedArrays !== true ? false : true; // default to false
   options.unorderedSets = options.unorderedSets === false ? false : true; // default to false
+  options.unorderedObjects = options.unorderedObjects === false ? false : true; // default to true
   options.replacer = options.replacer || undefined;
   options.excludeKeys = options.excludeKeys || undefined;
 
@@ -18693,7 +18725,10 @@ function typeHasher(options, writeTo, context){
           throw new Error('Unknown object type "' + objType + '"');
         }
       }else{
-        var keys = Object.keys(object).sort();
+        var keys = Object.keys(object);
+        if (options.unorderedObjects) {
+          keys = keys.sort();
+        }
         // Make sure to incorporate special properties, so
         // Types with different prototypes will produce
         // a different hash and objects derived from
@@ -18892,7 +18927,7 @@ function typeHasher(options, writeTo, context){
 
 // Mini-implementation of stream.PassThrough
 // We are far from having need for the full implementation, and we can
-// make assumtions like "many writes, then only one final read"
+// make assumptions like "many writes, then only one final read"
 // and we can ignore encoding specifics
 function PassThrough() {
   return {
@@ -19059,11 +19094,11 @@ var codes = {
   blueBG: [44, 49],
   magentaBG: [45, 49],
   cyanBG: [46, 49],
-  whiteBG: [47, 49]
+  whiteBG: [47, 49],
 
 };
 
-Object.keys(codes).forEach(function (key) {
+Object.keys(codes).forEach(function(key) {
   var val = codes[key];
   var style = styles[key] = [];
   style.open = '\u001b[' + val[0] + 'm';
@@ -19072,121 +19107,216 @@ Object.keys(codes).forEach(function (key) {
 });
 
 /*
-The MIT License (MIT)
+MIT License
 
 Copyright (c) Sindre Sorhus <sindresorhus@gmail.com> (sindresorhus.com)
 
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
+Permission is hereby granted, free of charge, to any person obtaining a copy of
+this software and associated documentation files (the "Software"), to deal in
+the Software without restriction, including without limitation the rights to
+use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies
+of the Software, and to permit persons to whom the Software is furnished to do
+so, subject to the following conditions:
 
-The above copyright notice and this permission notice shall be included in
-all copies or substantial portions of the Software.
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
 
 THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
 IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
 FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
 AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
 LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
-THE SOFTWARE.
-
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
 */
 
-var argv = process.argv;
+var hasFlag = function(flag, argv) {
+  argv = argv || process.argv;
 
-var supportsColors = (function () {
-  if (argv.indexOf('--no-color') !== -1 ||
-    argv.indexOf('--color=false') !== -1) {
+  var terminatorPos = argv.indexOf('--');
+  var prefix = /^-{1,2}/.test(flag) ? '' : '--';
+  var pos = argv.indexOf(prefix + flag);
+
+  return pos !== -1 && (terminatorPos === -1 ? true : pos < terminatorPos);
+};
+
+var env = process.env;
+
+var forceColor = void 0;
+if (hasFlag('no-color') || hasFlag('no-colors') || hasFlag('color=false')) {
+  forceColor = false;
+} else if (hasFlag('color') || hasFlag('colors') || hasFlag('color=true')
+           || hasFlag('color=always')) {
+  forceColor = true;
+}
+if ('FORCE_COLOR' in env) {
+  forceColor = env.FORCE_COLOR.length === 0
+    || parseInt(env.FORCE_COLOR, 10) !== 0;
+}
+
+function translateLevel(level) {
+  if (level === 0) {
     return false;
   }
 
-  if (argv.indexOf('--color') !== -1 ||
-    argv.indexOf('--color=true') !== -1 ||
-    argv.indexOf('--color=always') !== -1) {
-    return true;
+  return {
+    level: level,
+    hasBasic: true,
+    has256: level >= 2,
+    has16m: level >= 3,
+  };
+}
+
+function supportsColor(stream) {
+  if (forceColor === false) {
+    return 0;
   }
 
-  if (process.stdout && !process.stdout.isTTY) {
-    return false;
+  if (hasFlag('color=16m') || hasFlag('color=full')
+      || hasFlag('color=truecolor')) {
+    return 3;
   }
+
+  if (hasFlag('color=256')) {
+    return 2;
+  }
+
+  if (stream && !stream.isTTY && forceColor !== true) {
+    return 0;
+  }
+
+  var min = forceColor ? 1 : 0;
 
   if (process.platform === 'win32') {
-    return true;
+    // Node.js 7.5.0 is the first version of Node.js to include a patch to
+    // libuv that enables 256 color output on Windows. Anything earlier and it
+    // won't work. However, here we target Node.js 8 at minimum as it is an LTS
+    // release, and Node.js 7 is not. Windows 10 build 10586 is the first
+    // Windows release that supports 256 colors. Windows 10 build 14931 is the
+    // first release that supports 16m/TrueColor.
+    var osRelease = os.release().split('.');
+    if (Number(process.versions.node.split('.')[0]) >= 8
+        && Number(osRelease[0]) >= 10 && Number(osRelease[2]) >= 10586) {
+      return Number(osRelease[2]) >= 14931 ? 3 : 2;
+    }
+
+    return 1;
   }
 
-  if ('COLORTERM' in process.env) {
-    return true;
+  if ('CI' in env) {
+    if (['TRAVIS', 'CIRCLECI', 'APPVEYOR', 'GITLAB_CI'].some(function(sign) {
+      return sign in env;
+    }) || env.CI_NAME === 'codeship') {
+      return 1;
+    }
+
+    return min;
   }
 
-  if (process.env.TERM === 'dumb') {
-    return false;
+  if ('TEAMCITY_VERSION' in env) {
+    return (/^(9\.(0*[1-9]\d*)\.|\d{2,}\.)/.test(env.TEAMCITY_VERSION) ? 1 : 0
+    );
   }
 
-  if (/^screen|^xterm|^vt100|color|ansi|cygwin|linux/i.test(process.env.TERM)) {
-    return true;
+  if ('TERM_PROGRAM' in env) {
+    var version = parseInt((env.TERM_PROGRAM_VERSION || '').split('.')[0], 10);
+
+    switch (env.TERM_PROGRAM) {
+      case 'iTerm.app':
+        return version >= 3 ? 3 : 2;
+      case 'Hyper':
+        return 3;
+      case 'Apple_Terminal':
+        return 2;
+      // No default
+    }
   }
 
-  return false;
-})();
+  if (/-256(color)?$/i.test(env.TERM)) {
+    return 2;
+  }
+
+  if (/^screen|^xterm|^vt100|^rxvt|color|ansi|cygwin|linux/i.test(env.TERM)) {
+    return 1;
+  }
+
+  if ('COLORTERM' in env) {
+    return 1;
+  }
+
+  if (env.TERM === 'dumb') {
+    return min;
+  }
+
+  return min;
+}
+
+function getSupportLevel(stream) {
+  var level = supportsColor(stream);
+  return translateLevel(level);
+}
+
+var supportsColors = {
+  supportsColor: getSupportLevel,
+  stdout: getSupportLevel(process.stdout),
+  stderr: getSupportLevel(process.stderr),
+};
 
 var trap = createCommonjsModule(function (module) {
-module['exports'] = function runTheTrap (text, options) {
-  var result = "";
-  text = text || "Run the trap, drop the bass";
+module['exports'] = function runTheTrap(text, options) {
+  var result = '';
+  text = text || 'Run the trap, drop the bass';
   text = text.split('');
   var trap = {
-    a: ["\u0040", "\u0104", "\u023a", "\u0245", "\u0394", "\u039b", "\u0414"],
-    b: ["\u00df", "\u0181", "\u0243", "\u026e", "\u03b2", "\u0e3f"],
-    c: ["\u00a9", "\u023b", "\u03fe"],
-    d: ["\u00d0", "\u018a", "\u0500" , "\u0501" ,"\u0502", "\u0503"],
-    e: ["\u00cb", "\u0115", "\u018e", "\u0258", "\u03a3", "\u03be", "\u04bc", "\u0a6c"],
-    f: ["\u04fa"],
-    g: ["\u0262"],
-    h: ["\u0126", "\u0195", "\u04a2", "\u04ba", "\u04c7", "\u050a"],
-    i: ["\u0f0f"],
-    j: ["\u0134"],
-    k: ["\u0138", "\u04a0", "\u04c3", "\u051e"],
-    l: ["\u0139"],
-    m: ["\u028d", "\u04cd", "\u04ce", "\u0520", "\u0521", "\u0d69"],
-    n: ["\u00d1", "\u014b", "\u019d", "\u0376", "\u03a0", "\u048a"],
-    o: ["\u00d8", "\u00f5", "\u00f8", "\u01fe", "\u0298", "\u047a", "\u05dd", "\u06dd", "\u0e4f"],
-    p: ["\u01f7", "\u048e"],
-    q: ["\u09cd"],
-    r: ["\u00ae", "\u01a6", "\u0210", "\u024c", "\u0280", "\u042f"],
-    s: ["\u00a7", "\u03de", "\u03df", "\u03e8"],
-    t: ["\u0141", "\u0166", "\u0373"],
-    u: ["\u01b1", "\u054d"],
-    v: ["\u05d8"],
-    w: ["\u0428", "\u0460", "\u047c", "\u0d70"],
-    x: ["\u04b2", "\u04fe", "\u04fc", "\u04fd"],
-    y: ["\u00a5", "\u04b0", "\u04cb"],
-    z: ["\u01b5", "\u0240"]
+    a: ['\u0040', '\u0104', '\u023a', '\u0245', '\u0394', '\u039b', '\u0414'],
+    b: ['\u00df', '\u0181', '\u0243', '\u026e', '\u03b2', '\u0e3f'],
+    c: ['\u00a9', '\u023b', '\u03fe'],
+    d: ['\u00d0', '\u018a', '\u0500', '\u0501', '\u0502', '\u0503'],
+    e: ['\u00cb', '\u0115', '\u018e', '\u0258', '\u03a3', '\u03be', '\u04bc',
+         '\u0a6c'],
+    f: ['\u04fa'],
+    g: ['\u0262'],
+    h: ['\u0126', '\u0195', '\u04a2', '\u04ba', '\u04c7', '\u050a'],
+    i: ['\u0f0f'],
+    j: ['\u0134'],
+    k: ['\u0138', '\u04a0', '\u04c3', '\u051e'],
+    l: ['\u0139'],
+    m: ['\u028d', '\u04cd', '\u04ce', '\u0520', '\u0521', '\u0d69'],
+    n: ['\u00d1', '\u014b', '\u019d', '\u0376', '\u03a0', '\u048a'],
+    o: ['\u00d8', '\u00f5', '\u00f8', '\u01fe', '\u0298', '\u047a', '\u05dd',
+         '\u06dd', '\u0e4f'],
+    p: ['\u01f7', '\u048e'],
+    q: ['\u09cd'],
+    r: ['\u00ae', '\u01a6', '\u0210', '\u024c', '\u0280', '\u042f'],
+    s: ['\u00a7', '\u03de', '\u03df', '\u03e8'],
+    t: ['\u0141', '\u0166', '\u0373'],
+    u: ['\u01b1', '\u054d'],
+    v: ['\u05d8'],
+    w: ['\u0428', '\u0460', '\u047c', '\u0d70'],
+    x: ['\u04b2', '\u04fe', '\u04fc', '\u04fd'],
+    y: ['\u00a5', '\u04b0', '\u04cb'],
+    z: ['\u01b5', '\u0240'],
   };
-  text.forEach(function(c){
+  text.forEach(function(c) {
     c = c.toLowerCase();
-    var chars = trap[c] || [" "];
+    var chars = trap[c] || [' '];
     var rand = Math.floor(Math.random() * chars.length);
-    if (typeof trap[c] !== "undefined") {
+    if (typeof trap[c] !== 'undefined') {
       result += trap[c][rand];
     } else {
       result += c;
     }
   });
   return result;
-
 };
 });
 
 var zalgo = createCommonjsModule(function (module) {
 // please no
 module['exports'] = function zalgo(text, options) {
-  text = text || "   he is here   ";
+  text = text || '   he is here   ';
   var soul = {
-    "up" : [
+    'up': [
       '̍', '̎', '̄', '̅',
       '̿', '̑', '̆', '̐',
       '͒', '͗', '͑', '̇',
@@ -19199,9 +19329,9 @@ module['exports'] = function zalgo(text, options) {
       'ͦ', 'ͧ', 'ͨ', 'ͩ',
       'ͪ', 'ͫ', 'ͬ', 'ͭ',
       'ͮ', 'ͯ', '̾', '͛',
-      '͆', '̚'
+      '͆', '̚',
     ],
-    "down" : [
+    'down': [
       '̖', '̗', '̘', '̙',
       '̜', '̝', '̞', '̟',
       '̠', '̤', '̥', '̦',
@@ -19211,47 +19341,53 @@ module['exports'] = function zalgo(text, options) {
       '̺', '̻', '̼', 'ͅ',
       '͇', '͈', '͉', '͍',
       '͎', '͓', '͔', '͕',
-      '͖', '͙', '͚', '̣'
+      '͖', '͙', '͚', '̣',
     ],
-    "mid" : [
+    'mid': [
       '̕', '̛', '̀', '́',
       '͘', '̡', '̢', '̧',
       '̨', '̴', '̵', '̶',
       '͜', '͝', '͞',
       '͟', '͠', '͢', '̸',
-      '̷', '͡', ' ҉'
-    ]
-  },
-  all = [].concat(soul.up, soul.down, soul.mid);
+      '̷', '͡', ' ҉',
+    ],
+  };
+  var all = [].concat(soul.up, soul.down, soul.mid);
 
   function randomNumber(range) {
     var r = Math.floor(Math.random() * range);
     return r;
   }
 
-  function is_char(character) {
+  function isChar(character) {
     var bool = false;
-    all.filter(function (i) {
+    all.filter(function(i) {
       bool = (i === character);
     });
     return bool;
   }
-  
+
 
   function heComes(text, options) {
-    var result = '', counts, l;
+    var result = '';
+    var counts;
+    var l;
     options = options || {};
-    options["up"] =   typeof options["up"]   !== 'undefined' ? options["up"]   : true;
-    options["mid"] =  typeof options["mid"]  !== 'undefined' ? options["mid"]  : true;
-    options["down"] = typeof options["down"] !== 'undefined' ? options["down"] : true;
-    options["size"] = typeof options["size"] !== 'undefined' ? options["size"] : "maxi";
+    options['up'] =
+      typeof options['up'] !== 'undefined' ? options['up'] : true;
+    options['mid'] =
+      typeof options['mid'] !== 'undefined' ? options['mid'] : true;
+    options['down'] =
+      typeof options['down'] !== 'undefined' ? options['down'] : true;
+    options['size'] =
+      typeof options['size'] !== 'undefined' ? options['size'] : 'maxi';
     text = text.split('');
     for (l in text) {
-      if (is_char(l)) {
+      if (isChar(l)) {
         continue;
       }
       result = result + text[l];
-      counts = {"up" : 0, "down" : 0, "mid" : 0};
+      counts = {'up': 0, 'down': 0, 'mid': 0};
       switch (options.size) {
       case 'mini':
         counts.up = randomNumber(8);
@@ -19270,10 +19406,10 @@ module['exports'] = function zalgo(text, options) {
         break;
       }
 
-      var arr = ["up", "mid", "down"];
+      var arr = ['up', 'mid', 'down'];
       for (var d in arr) {
         var index = arr[d];
-        for (var i = 0 ; i <= counts[index]; i++) {
+        for (var i = 0; i <= counts[index]; i++) {
           if (options[index]) {
             result = result + soul[index][randomNumber(soul[index].length)];
           }
@@ -19289,28 +19425,29 @@ module['exports'] = function zalgo(text, options) {
 
 var america = createCommonjsModule(function (module) {
 module['exports'] = (function() {
-  return function (letter, i, exploded) {
-    if(letter === " ") return letter;
-    switch(i%3) {
+  return function(letter, i, exploded) {
+    if (letter === ' ') return letter;
+    switch (i%3) {
       case 0: return colors_1.red(letter);
-      case 1: return colors_1.white(letter)
-      case 2: return colors_1.blue(letter)
+      case 1: return colors_1.white(letter);
+      case 2: return colors_1.blue(letter);
     }
-  }
+  };
 })();
 });
 
 var zebra = createCommonjsModule(function (module) {
-module['exports'] = function (letter, i, exploded) {
+module['exports'] = function(letter, i, exploded) {
   return i % 2 === 0 ? letter : colors_1.inverse(letter);
 };
 });
 
 var rainbow = createCommonjsModule(function (module) {
-module['exports'] = (function () {
-  var rainbowColors = ['red', 'yellow', 'green', 'blue', 'magenta']; //RoY G BiV
-  return function (letter, i, exploded) {
-    if (letter === " ") {
+module['exports'] = (function() {
+  // RoY G BiV
+  var rainbowColors = ['red', 'yellow', 'green', 'blue', 'magenta'];
+  return function(letter, i, exploded) {
+    if (letter === ' ') {
       return letter;
     } else {
       return colors_1[rainbowColors[i++ % rainbowColors.length]](letter);
@@ -19320,10 +19457,14 @@ module['exports'] = (function () {
 });
 
 var random = createCommonjsModule(function (module) {
-module['exports'] = (function () {
-  var available = ['underline', 'inverse', 'grey', 'yellow', 'red', 'green', 'blue', 'white', 'cyan', 'magenta'];
+module['exports'] = (function() {
+  var available = ['underline', 'inverse', 'grey', 'yellow', 'red', 'green',
+    'blue', 'white', 'cyan', 'magenta'];
   return function(letter, i, exploded) {
-    return letter === " " ? letter : colors_1[available[Math.round(Math.random() * (available.length - 1))]](letter);
+    return letter === ' ' ? letter :
+      colors_1[
+        available[Math.round(Math.random() * (available.length - 2))]
+      ](letter);
   };
 })();
 });
@@ -19333,7 +19474,7 @@ var colors_1 = createCommonjsModule(function (module) {
 
 The MIT License (MIT)
 
-Original Library 
+Original Library
   - Copyright (c) Marak Squires
 
 Additional functionality
@@ -19364,21 +19505,31 @@ module['exports'] = colors;
 
 colors.themes = {};
 
+
 var ansiStyles = colors.styles = styles_1;
 var defineProps = Object.defineProperties;
+var newLineRegex = new RegExp(/[\r\n]+/g);
 
-colors.supportsColor = supportsColors;
+colors.supportsColor = supportsColors.supportsColor;
 
-if (typeof colors.enabled === "undefined") {
-  colors.enabled = colors.supportsColor;
+if (typeof colors.enabled === 'undefined') {
+  colors.enabled = colors.supportsColor() !== false;
 }
 
-colors.stripColors = colors.strip = function(str){
-  return ("" + str).replace(/\x1B\[\d+m/g, '');
+colors.enable = function() {
+  colors.enabled = true;
 };
 
+colors.disable = function() {
+  colors.enabled = false;
+};
 
-var stylize = colors.stylize = function stylize (str, style) {
+colors.stripColors = colors.strip = function(str) {
+  return ('' + str).replace(/\x1B\[\d+m/g, '');
+};
+
+// eslint-disable-next-line no-unused-vars
+var stylize = colors.stylize = function stylize(str, style) {
   if (!colors.enabled) {
     return str+'';
   }
@@ -19387,11 +19538,11 @@ var stylize = colors.stylize = function stylize (str, style) {
 };
 
 var matchOperatorsRe = /[|\\{}()[\]^$+*?.]/g;
-var escapeStringRegexp = function (str) {
+var escapeStringRegexp = function(str) {
   if (typeof str !== 'string') {
     throw new TypeError('Expected a string');
   }
-  return str.replace(matchOperatorsRe,  '\\$&');
+  return str.replace(matchOperatorsRe, '\\$&');
 };
 
 function build(_styles) {
@@ -19405,15 +19556,16 @@ function build(_styles) {
   return builder;
 }
 
-var styles = (function () {
+var styles = (function() {
   var ret = {};
   ansiStyles.grey = ansiStyles.gray;
-  Object.keys(ansiStyles).forEach(function (key) {
-    ansiStyles[key].closeRe = new RegExp(escapeStringRegexp(ansiStyles[key].close), 'g');
+  Object.keys(ansiStyles).forEach(function(key) {
+    ansiStyles[key].closeRe =
+      new RegExp(escapeStringRegexp(ansiStyles[key].close), 'g');
     ret[key] = {
-      get: function () {
+      get: function() {
         return build(this._styles.concat(key));
-      }
+      },
     };
   });
   return ret;
@@ -19422,18 +19574,17 @@ var styles = (function () {
 var proto = defineProps(function colors() {}, styles);
 
 function applyStyle() {
-  var args = arguments;
-  var argsLen = args.length;
-  var str = argsLen !== 0 && String(arguments[0]);
-  if (argsLen > 1) {
-    for (var a = 1; a < argsLen; a++) {
-      str += ' ' + args[a];
-    }
-  }
+  var args = Array.prototype.slice.call(arguments);
+
+  var str = args.map(function(arg) {
+    return arg.constructor === String ? arg : util.inspect(arg);
+  }).join(' ');
 
   if (!colors.enabled || !str) {
     return str;
   }
+
+  var newLinesPresent = str.indexOf('\n') != -1;
 
   var nestedStyles = this._styles;
 
@@ -19441,18 +19592,31 @@ function applyStyle() {
   while (i--) {
     var code = ansiStyles[nestedStyles[i]];
     str = code.open + str.replace(code.closeRe, code.open) + code.close;
+    if (newLinesPresent) {
+      str = str.replace(newLineRegex, code.close + '\n' + code.open);
+    }
   }
 
   return str;
 }
 
-function applyTheme (theme) {
+colors.setTheme = function(theme) {
+  if (typeof theme === 'string') {
+    console.log('colors.setTheme now only accepts an object, not a string.  ' +
+      'If you are trying to set a theme from a file, it is now your (the ' +
+      'caller\'s) responsibility to require the file.  The old syntax ' +
+      'looked like colors.setTheme(__dirname + ' +
+      '\'/../themes/generic-logging.js\'); The new syntax looks like '+
+      'colors.setTheme(require(__dirname + ' +
+      '\'/../themes/generic-logging.js\'));');
+    return;
+  }
   for (var style in theme) {
-    (function(style){
-      colors[style] = function(str){
-        if (typeof theme[style] === 'object'){
+    (function(style) {
+      colors[style] = function(str) {
+        if (typeof theme[style] === 'object') {
           var out = str;
-          for (var i in theme[style]){
+          for (var i in theme[style]) {
             out = colors[theme[style][i]](out);
           }
           return out;
@@ -19461,39 +19625,24 @@ function applyTheme (theme) {
       };
     })(style);
   }
-}
-
-colors.setTheme = function (theme) {
-  if (typeof theme === 'string') {
-    try {
-      colors.themes[theme] = commonjsRequire(theme);
-      applyTheme(colors.themes[theme]);
-      return colors.themes[theme];
-    } catch (err) {
-      console.log(err);
-      return err;
-    }
-  } else {
-    applyTheme(theme);
-  }
 };
 
 function init() {
   var ret = {};
-  Object.keys(styles).forEach(function (name) {
+  Object.keys(styles).forEach(function(name) {
     ret[name] = {
-      get: function () {
+      get: function() {
         return build([name]);
-      }
+      },
     };
   });
   return ret;
 }
 
-var sequencer = function sequencer (map, str) {
-  var exploded = str.split("");
+var sequencer = function sequencer(map, str) {
+  var exploded = str.split('');
   exploded = exploded.map(map);
-  return exploded.join("");
+  return exploded.join('');
 };
 
 // custom formatter methods
@@ -19508,8 +19657,8 @@ colors.maps.rainbow = rainbow;
 colors.maps.random = random;
 
 for (var map in colors.maps) {
-  (function(map){
-    colors[map] = function (str) {
+  (function(map) {
+    colors[map] = function(str) {
       return sequencer(colors.maps[map], str);
     };
   })(map);
@@ -19520,9 +19669,10 @@ defineProps(colors, init());
 
 var safe = createCommonjsModule(function (module) {
 //
-// Remark: Requiring this file will use the "safe" colors API which will not touch String.prototype
+// Remark: Requiring this file will use the "safe" colors API,
+// which will not touch String.prototype.
 //
-//   var colors = require('colors/safe);
+//   var colors = require('colors/safe');
 //   colors.red("foo")
 //
 //
@@ -19797,6 +19947,7 @@ function getOptionsOverrides(_a, tsConfigJson) {
         importHelpers: true,
         noResolve: false,
         noEmit: false,
+        inlineSourceMap: false,
         outDir: process.cwd(),
         moduleResolution: tsModule.ModuleResolutionKind.NodeJs,
     };
@@ -19908,6 +20059,7 @@ function typescript(options) {
         tsconfig: undefined,
         useTsconfigDeclarationDir: false,
         tsconfigOverride: {},
+        transformers: [],
         tsconfigDefaults: {},
     });
     setTypescriptModule(pluginOptions.typescript);
@@ -19917,7 +20069,7 @@ function typescript(options) {
             rollupOptions = __assign({}, config);
             context = new ConsoleContext(pluginOptions.verbosity, "rpt2: ");
             context.info("typescript version: " + tsModule.version);
-            context.info("rollup-plugin-typescript2 version: 0.12.1");
+            context.info("rollup-plugin-typescript2 version: 0.14.1");
             context.debug(function () { return "plugin options:\n" + JSON.stringify(pluginOptions, function (key, value) { return key === "typescript" ? "version " + value.version : value; }, 4); });
             context.debug(function () { return "rollup config:\n" + JSON.stringify(rollupOptions, undefined, 4); });
             watchMode = process.env.ROLLUP_WATCH === "true";
@@ -19953,8 +20105,9 @@ function typescript(options) {
                 context.debug(function () { return "included:\n'" + JSON.stringify(pluginOptions.include, undefined, 4) + "'"; });
                 context.debug(function () { return "excluded:\n'" + JSON.stringify(pluginOptions.exclude, undefined, 4) + "'"; });
             }
-            servicesHost = new LanguageServiceHost(parsedConfig, pluginOptions.fileExistsHook || (function () { return false; }), pluginOptions.readFileHook || (function () { }));
+            servicesHost = new LanguageServiceHost(parsedConfig, pluginOptions.fileExistsHook || (function () { return false; }), pluginOptions.readFileHook || (function () { }), pluginOptions.transformers);
             service = tsModule.createLanguageService(servicesHost, tsModule.createDocumentRegistry());
+            servicesHost.setLanguageService(service);
             // printing compiler option errors
             if (pluginOptions.check)
                 printDiagnostics(context, convertDiagnostic("options", service.getCompilerOptionsDiagnostics()), parsedConfig.options.pretty === true);

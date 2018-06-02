@@ -1,14 +1,17 @@
 import * as tsTypes from "typescript";
-import { FileExistsHook, ReadFileHook } from "./ioptions";
+import { FileExistsHook, ReadFileHook, TransformerFactoryCreator } from "./ioptions";
 export declare class LanguageServiceHost implements tsTypes.LanguageServiceHost {
     private parsedConfig;
     private fileExistsHook;
     private readFileHook;
+    private transformers;
     private cwd;
     private snapshots;
     private versions;
-    constructor(parsedConfig: tsTypes.ParsedCommandLine, fileExistsHook: FileExistsHook, readFileHook: ReadFileHook);
+    private service?;
+    constructor(parsedConfig: tsTypes.ParsedCommandLine, fileExistsHook: FileExistsHook, readFileHook: ReadFileHook, transformers: TransformerFactoryCreator[]);
     reset(): void;
+    setLanguageService(service: tsTypes.LanguageService): void;
     setSnapshot(fileName: string, data: string): tsTypes.IScriptSnapshot;
     getScriptSnapshot(fileName: string): tsTypes.IScriptSnapshot | undefined;
     getCurrentDirectory(): string;
@@ -23,4 +26,5 @@ export declare class LanguageServiceHost implements tsTypes.LanguageServiceHost 
     getTypeRootsVersion(): number;
     directoryExists(directoryName: string): boolean;
     getDirectories(directoryName: string): string[];
+    getCustomTransformers(): tsTypes.CustomTransformers | undefined;
 }

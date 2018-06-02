@@ -57,6 +57,7 @@ export default function typescript(options?: Partial<IOptions>)
 			tsconfig: undefined,
 			useTsconfigDeclarationDir: false,
 			tsconfigOverride: {},
+			transformers: [],
 			tsconfigDefaults: {},
 		});
 
@@ -121,9 +122,10 @@ export default function typescript(options?: Partial<IOptions>)
 				context.debug(() => `excluded:\n'${JSON.stringify(pluginOptions.exclude, undefined, 4)}'`);
 			}
 
-			servicesHost = new LanguageServiceHost(parsedConfig, pluginOptions.fileExistsHook || (() => false), pluginOptions.readFileHook || (() => {}));
+			servicesHost = new LanguageServiceHost(parsedConfig, pluginOptions.fileExistsHook || (() => false), pluginOptions.readFileHook || (() => {}), pluginOptions.transformers);
 
 			service = tsModule.createLanguageService(servicesHost, tsModule.createDocumentRegistry());
+			servicesHost.setLanguageService(service);
 
 			// printing compiler option errors
 			if (pluginOptions.check)

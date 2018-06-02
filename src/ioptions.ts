@@ -1,5 +1,13 @@
 import { tsModule } from "./tsproxy";
-import * as ts from "typescript";
+import * as tsTypes from "typescript";
+
+export interface ICustomTransformer
+{
+	before?: tsTypes.TransformerFactory<tsTypes.SourceFile>;
+	after?: tsTypes.TransformerFactory<tsTypes.SourceFile>;
+}
+
+export type TransformerFactoryCreator = (ls: tsTypes.LanguageService) => tsTypes.CustomTransformers | ICustomTransformer;
 
 export type FileExistsHook = (path: string) => boolean;
 export type ReadFileHook = (path: string) => string | void;
@@ -18,9 +26,10 @@ export interface IOptions
 	useTsconfigDeclarationDir: boolean;
 	typescript: typeof tsModule;
 	tsconfigOverride: any;
+	transformers: TransformerFactoryCreator[];
 	tsconfigDefaults: any;
 	sourceMapCallback: (id: string, map: string) => void;
-	programCreated: (program: ts.Program) => void;
+	programCreated: (program: tsTypes.Program) => void;
 	readFileHook: ReadFileHook;
 	fileExistsHook: FileExistsHook;
 }

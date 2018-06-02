@@ -2,15 +2,16 @@ import { tsModule } from "./tsproxy";
 import * as tsTypes from "typescript";
 import * as _ from "lodash";
 import { normalize } from "./normalize";
-import { FileExistsHook, ReadFileHook } from "./ioptions";
+import { FileExistsHook, ReadFileHook, TransformerFactoryCreator } from "./ioptions";
 
 export class LanguageServiceHost implements tsTypes.LanguageServiceHost
 {
 	private cwd = process.cwd();
 	private snapshots: { [fileName: string]: tsTypes.IScriptSnapshot } = {};
 	private versions: { [fileName: string]: number } = {};
+	private service?: tsTypes.LanguageService;
 
-	constructor(private parsedConfig: tsTypes.ParsedCommandLine, private fileExistsHook: FileExistsHook, private readFileHook: ReadFileHook)
+	constructor(private parsedConfig: tsTypes.ParsedCommandLine, private fileExistsHook: FileExistsHook, private readFileHook: ReadFileHook, private transformers: TransformerFactoryCreator[])
 	{
 	}
 
@@ -18,6 +19,11 @@ export class LanguageServiceHost implements tsTypes.LanguageServiceHost
 	{
 		this.snapshots = {};
 		this.versions = {};
+	}
+
+	public setLanguageService(service: tsTypes.LanguageService)
+	{
+		this.service = service;
 	}
 
 	public setSnapshot(fileName: string, data: string): tsTypes.IScriptSnapshot
@@ -111,5 +117,28 @@ export class LanguageServiceHost implements tsTypes.LanguageServiceHost
 	public getDirectories(directoryName: string): string[]
 	{
 		return tsModule.sys.getDirectories(directoryName);
+	}
+
+	public getCustomTransformers(): tsTypes.CustomTransformers | undefined
+	{
+		if (this.service === undefined || this.transformers === undefined || this.transformers.length === 0)
+			return undefined;
+
+		const transformer: tsTypes.CustomTransformers =
+		{
+			before: [],
+			after: [],
+		};
+
+		for (const creator of this.transformers)
+		{
+			const factory = creator(this.service);
+			if (factory.before)
+				transformer.before = _.concat(transformer.before!, factory.before);
+			if (factory.after)
+				transformer.after = _.concat(transformer.after!, factory.after);
+		}
+
+		return transformer;
 	}
 }
