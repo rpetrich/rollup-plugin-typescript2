@@ -19758,7 +19758,7 @@ var TsCache = /** @class */ (function () {
         this.context = context;
         this.cacheVersion = "7";
         this.ambientTypesDirty = false;
-        this.cacheDir = cache + "/" + objectHash_2({
+        this.cacheDir = noCache ? cache : cache + "/" + objectHash_2({
             version: this.cacheVersion,
             rootFilenames: rootFilenames,
             options: this.options,

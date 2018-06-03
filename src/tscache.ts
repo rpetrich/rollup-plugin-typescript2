@@ -82,7 +82,7 @@ export class TsCache
 
 	constructor(private noCache: boolean, private host: tsTypes.LanguageServiceHost, cache: string, private options: tsTypes.CompilerOptions, private rollupConfig: any, rootFilenames: string[], private context: IContext)
 	{
-		this.cacheDir = `${cache}/${sha1({
+		this.cacheDir = noCache ? cache : `${cache}/${sha1({
 			version: this.cacheVersion,
 			rootFilenames,
 			options: this.options,
