@@ -289,6 +289,9 @@ export class TsCache
 
 	private makeName(id: string, snapshot: tsTypes.IScriptSnapshot)
 	{
+		if (this.noCache) {
+			return sha1(id);
+		}
 		const data = snapshot.getText(0, snapshot.getLength());
 		return sha1({ data, id });
 	}

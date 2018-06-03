@@ -19903,6 +19903,9 @@ var TsCache = /** @class */ (function () {
         });
     };
     TsCache.prototype.makeName = function (id, snapshot) {
+        if (this.noCache) {
+            return objectHash_2(id);
+        }
         var data = snapshot.getText(0, snapshot.getLength());
         return objectHash_2({ data: data, id: id });
     };
